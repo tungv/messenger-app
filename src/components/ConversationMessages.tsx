@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 import useInfiniteScroll from "./useInfiniteScroll";
 import useInterval from "./useInterval";
 
+interface Message {
+  id: string;
+  text: string;
+  createdAt: string;
+  sender: {
+    id: string;
+    name: string;
+  };
+}
 interface MessagesResponse {
   rows: Message[];
   sort: "NEWEST_FIRST" | "OLDEST_FIRST";
@@ -9,9 +18,14 @@ interface MessagesResponse {
   cursor_prev: string;
 }
 
+interface LocalMessage extends Message {
+  isUploaded: boolean;
+}
+
 export default function ConversationMesssages({ conversationId, accountId }) {
   const apiPath = `/api/account/${accountId}/conversation/${conversationId}/messages`;
   const [messages, setMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
 
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [newerCursor, setNewerCursor] = useState<string | null>(null);
@@ -83,6 +97,7 @@ export default function ConversationMesssages({ conversationId, accountId }) {
         sort === "NEWEST_FIRST" ? rows : rows.reverse();
 
       setMessages((existing) => [...sortedByNewestFirst, ...existing]);
+      setLocalMessages([]);
     }
 
     loadNewer();
@@ -126,31 +141,72 @@ export default function ConversationMesssages({ conversationId, accountId }) {
         }
       `}</style>
       <div className="messages" ref={containerRef}>
+        {localMessages.map((message) => (
+          <LocalChatMessage key={message.id} message={message} />
+        ))}
         {messages.map((message) => (
           <ChatMessage key={message.id} message={message} />
         ))}
         <div ref={loadMoreRef}>Loading older messages…</div>
       </div>
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
+
+          const form = e.target;
+          const input = form["text"] as HTMLInputElement;
+
+          // get message text from form element without controlled input
+          const text = input.value;
+          input.value = "";
+
+          const localId = `local-${Date.now()}`;
+          const localMessage: LocalMessage = {
+            id: localId,
+            text: text,
+            isUploaded: false,
+            sender: {
+              id: accountId,
+              name: "~",
+            },
+            createdAt: new Date().toISOString(),
+          };
+
+          setLocalMessages((existing) => [localMessage, ...existing]);
+
+          const newMessageObject: Message = await createNewMessage(
+            apiPath,
+            text,
+          );
+
+          setLocalMessages((existing) => {
+            // find the existing message with the same id
+            const existingMessage = existing.find((m) => m.id === localId);
+            if (existingMessage) {
+              // replace it with the new message
+              const index = existing.indexOf(existingMessage);
+              return [
+                ...existing.slice(0, index),
+                { ...newMessageObject, isUploaded: true },
+                ...existing.slice(index + 1),
+              ];
+            } else {
+              // add the new message to the beginning
+              return [{ ...newMessageObject, isUploaded: true }, ...existing];
+            }
+          });
         }}
       >
-        <input type="text" />
+        <input
+          id="text"
+          aria-label="New Chat Message"
+          placeholder="new message"
+          type="text"
+        />
         <button type="submit">Send</button>
       </form>
     </div>
   );
-}
-
-interface Message {
-  id: string;
-  text: string;
-  createdAt: string;
-  sender: {
-    id: string;
-    name: string;
-  };
 }
 
 function ChatMessage({ message }: { message: Message }) {
@@ -192,4 +248,64 @@ function ChatMessage({ message }: { message: Message }) {
       `}</style>
     </div>
   );
+}
+function LocalChatMessage({ message }: { message: LocalMessage }) {
+  return (
+    <div
+      key={message.id}
+      className="message"
+      style={{ opacity: message.isUploaded ? 1 : 0.7 }}
+    >
+      <p>
+        (<code>#{message.id})</code> {message.text}
+      </p>
+      <p className="secondary">
+        by: {message.sender.name} at{" "}
+        {new Intl.DateTimeFormat(undefined, {
+          hour: "numeric",
+          minute: "numeric",
+          second: "numeric",
+          year: "numeric",
+          month: "numeric",
+          day: "numeric",
+        }).format(new Date(message.createdAt))}
+      </p>
+
+      <style jsx>{`
+        .message {
+          background: white;
+          border-radius: 5px;
+          width: fit-content;
+          padding: 1rem;
+        }
+
+        .secondary {
+          color: hsl(0 0% 50% / 57%);
+          font-size: 0.75rem;
+        }
+
+        p {
+          padding: 0;
+          line-height: 1.2rem;
+          margin: 0;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+async function createNewMessage(url: string, text: string): Promise<Message> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+
+  return response.json() as Promise<Message>;
 }
