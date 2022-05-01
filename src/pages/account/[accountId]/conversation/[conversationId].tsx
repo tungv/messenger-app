@@ -1,5 +1,5 @@
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import useInfiniteScroll from "../../../../components/useInfiniteScroll";
 
 export default function ConversationPage() {
@@ -75,8 +75,10 @@ function ConversationMesssages({ conversationId, accountId }) {
       sort === "OLDEST_FIRST" ? cursor_next : cursor_prev;
     setOlderCursor(updatedOlderCursor);
 
+    const sortedByNewestFirst = sort === "NEWEST_FIRST" ? rows : rows.reverse();
+
     // messages are already sorted by newest first
-    setMessages((existing) => [...existing, ...rows.reverse()]);
+    setMessages((existing) => [...existing, ...sortedByNewestFirst]);
   }
 
   useEffect(() => {
@@ -89,7 +91,7 @@ function ConversationMesssages({ conversationId, accountId }) {
       });
 
       const data = await response.json();
-      const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
+      const { rows, cursor_next, cursor_prev } = data as MessagesResponse;
 
       setMessages(rows);
       setOlderCursor(cursor_prev);
@@ -102,6 +104,36 @@ function ConversationMesssages({ conversationId, accountId }) {
       controller.abort();
     };
   }, [apiPath]);
+
+  // interval pooling for newer messages
+  useInterval(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
+    async function loadNewer() {
+      if (!newerCursor) return;
+      const resp = await fetch(`${apiPath}?cursor=${newerCursor}`, { signal });
+
+      const data = await resp.json();
+      const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
+
+      const updatedNewerCursor =
+        sort === "NEWEST_FIRST" ? cursor_next : cursor_prev;
+
+      setNewerCursor(updatedNewerCursor);
+
+      const sortedByNewestFirst =
+        sort === "NEWEST_FIRST" ? rows : rows.reverse();
+
+      setMessages((existing) => [...sortedByNewestFirst, ...existing]);
+    }
+
+    loadNewer();
+
+    return () => {
+      controller.abort();
+    };
+  }, 10000);
 
   return (
     <div className="container">
@@ -196,4 +228,24 @@ interface Message {
     id: string;
     name: string;
   };
+}
+
+function useInterval(cb: () => () => void, delay: number) {
+  const fnRef = useRef(cb);
+  const unsubRef = useRef(() => {});
+
+  useLayoutEffect(() => {
+    fnRef.current = cb;
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      unsubRef.current = fnRef.current();
+    }, delay);
+
+    return () => {
+      clearInterval(interval);
+      unsubRef.current?.();
+    };
+  }, [delay]);
 }
