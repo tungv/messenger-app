@@ -1,3 +1,4 @@
+import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import useInfiniteScroll from "./useInfiniteScroll";
 import useInterval from "./useInterval";
@@ -210,13 +211,23 @@ export default function ConversationMesssages({ conversationId, accountId }) {
 }
 
 function ChatMessage({ message }: { message: Message }) {
+  const router = useRouter();
+  const {
+    query: { accountId },
+  } = router;
   return (
-    <div key={message.id} className="message">
+    <div
+      key={message.id}
+      className="message"
+      style={{
+        alignSelf: accountId === message.sender.id ? "flex-end" : "flex-start",
+      }}
+    >
       <p>
         (<code>#{message.id})</code> {message.text}
       </p>
       <p className="secondary">
-        by: {message.sender.name} at{" "}
+        by: {accountId === message.sender.id ? "You" : message.sender.name} at{" "}
         {new Intl.DateTimeFormat(undefined, {
           hour: "numeric",
           minute: "numeric",
@@ -260,7 +271,7 @@ function LocalChatMessage({ message }: { message: LocalMessage }) {
         (<code>#{message.id})</code> {message.text}
       </p>
       <p className="secondary">
-        by: {message.sender.name} at{" "}
+        by: You at{" "}
         {new Intl.DateTimeFormat(undefined, {
           hour: "numeric",
           minute: "numeric",
