@@ -1,5 +1,5 @@
 import { useRouter } from "next/router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function ConversationPage() {
   const router = useRouter();
@@ -36,14 +36,42 @@ export default function ConversationPage() {
       </aside>
 
       <div>
-        <ConversationMesssages />
+        <ConversationMesssages
+          conversationId={conversationId}
+          accountId={accountId}
+        />
       </div>
     </div>
   );
 }
 
-function ConversationMesssages() {
+function ConversationMesssages({ conversationId, accountId }) {
   const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
+    async function getMessages() {
+      const response = await fetch(
+        `/api/account/${conversationId}/conversation/${conversationId}/messages`,
+        {
+          signal,
+        },
+      );
+
+      const data = await response.json();
+      const { sort, rows, cursor_next, cursor_prev } = data;
+
+      setMessages(rows);
+    }
+
+    getMessages();
+
+    return () => {
+      controller.abort();
+    };
+  }, [conversationId, accountId]);
 
   return (
     <div className="container">
@@ -60,6 +88,30 @@ function ConversationMesssages() {
         .messages {
           flex: 1;
           overflow: auto;
+
+          display: flex;
+          flex-direction: column-reverse;
+          align-items: flex-end;
+          gap: 10px;
+          padding: 10px;
+        }
+
+        .message {
+          background: white;
+          border-radius: 5px;
+          width: fit-content;
+          padding: 1rem;
+        }
+
+        .secondary {
+          color: hsl(0 0% 50% / 57%);
+          font-size: 0.75rem;
+        }
+
+        p {
+          padding: 0;
+          line-height: 1.2rem;
+          margin: 0;
         }
 
         form {
@@ -72,7 +124,25 @@ function ConversationMesssages() {
           flex: 1;
         }
       `}</style>
-      <div className="messages"></div>
+      <div className="messages">
+        {messages.map((message) => (
+          <div key={message.id} className="message">
+            <p>{message.text}</p>
+            <p className="secondary">
+              by: {message.sender.name} at{" "}
+              {new Intl.DateTimeFormat(undefined, {
+                hour: "numeric",
+                minute: "numeric",
+                second: "numeric",
+
+                year: "numeric",
+                month: "numeric",
+                day: "numeric",
+              }).format(new Date(message.createdAt))}
+            </p>
+          </div>
+        ))}
+      </div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
