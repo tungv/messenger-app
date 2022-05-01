@@ -16,25 +16,28 @@ export default function ConversationMesssages({ conversationId, accountId }) {
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [newerCursor, setNewerCursor] = useState<string | null>(null);
 
-  const { loadMoreRef, containerRef } = useInfiniteScroll(loadOlder);
+  // infinite scroll
+  const { loadMoreRef, containerRef } = useInfiniteScroll(
+    async function loadOlder() {
+      if (!olderCursor) return;
+      const resp = await fetch(`${apiPath}?cursor=${olderCursor}`);
 
-  async function loadOlder() {
-    if (!olderCursor) return;
-    const resp = await fetch(`${apiPath}?cursor=${olderCursor}`);
+      const data = await resp.json();
+      const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
 
-    const data = await resp.json();
-    const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
+      const updatedOlderCursor =
+        sort === "OLDEST_FIRST" ? cursor_next : cursor_prev;
+      setOlderCursor(updatedOlderCursor);
 
-    const updatedOlderCursor =
-      sort === "OLDEST_FIRST" ? cursor_next : cursor_prev;
-    setOlderCursor(updatedOlderCursor);
+      const sortedByNewestFirst =
+        sort === "NEWEST_FIRST" ? rows : rows.reverse();
 
-    const sortedByNewestFirst = sort === "NEWEST_FIRST" ? rows : rows.reverse();
+      // messages are already sorted by newest first
+      setMessages((existing) => [...existing, ...sortedByNewestFirst]);
+    },
+  );
 
-    // messages are already sorted by newest first
-    setMessages((existing) => [...existing, ...sortedByNewestFirst]);
-  }
-
+  // initial load
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
