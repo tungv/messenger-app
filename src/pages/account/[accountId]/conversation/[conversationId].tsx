@@ -1,5 +1,6 @@
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
+import useInfiniteScroll from "../../../../components/useInfiniteScroll";
 
 export default function ConversationPage() {
   const router = useRouter();
@@ -36,42 +37,71 @@ export default function ConversationPage() {
       </aside>
 
       <div>
-        <ConversationMesssages
-          conversationId={conversationId}
-          accountId={accountId}
-        />
+        {conversationId && accountId ? (
+          <ConversationMesssages
+            conversationId={conversationId}
+            accountId={accountId}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
+interface MessagesResponse {
+  rows: Message[];
+  sort: "NEWEST_FIRST" | "OLDEST_FIRST";
+  cursor_next: string;
+  cursor_prev: string;
+}
+
 function ConversationMesssages({ conversationId, accountId }) {
+  const apiPath = `/api/account/${accountId}/conversation/${conversationId}/messages`;
   const [messages, setMessages] = useState<Message[]>([]);
+
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [newerCursor, setNewerCursor] = useState<string | null>(null);
+
+  const { loadMoreRef, containerRef } = useInfiniteScroll(loadOlder);
+
+  async function loadOlder() {
+    if (!olderCursor) return;
+    const resp = await fetch(`${apiPath}?cursor=${olderCursor}`);
+
+    const data = await resp.json();
+    const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
+
+    const updatedOlderCursor =
+      sort === "OLDEST_FIRST" ? cursor_next : cursor_prev;
+    setOlderCursor(updatedOlderCursor);
+
+    // messages are already sorted by newest first
+    setMessages((existing) => [...existing, ...rows.reverse()]);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
 
-    async function getMessages() {
-      const response = await fetch(
-        `/api/account/${conversationId}/conversation/${conversationId}/messages`,
-        {
-          signal,
-        },
-      );
+    async function getInitialMessages() {
+      const response = await fetch(apiPath, {
+        signal,
+      });
 
       const data = await response.json();
-      const { sort, rows, cursor_next, cursor_prev } = data;
+      const { sort, rows, cursor_next, cursor_prev } = data as MessagesResponse;
 
       setMessages(rows);
+      setOlderCursor(cursor_prev);
+      setNewerCursor(cursor_next);
     }
 
-    getMessages();
+    getInitialMessages();
 
     return () => {
       controller.abort();
     };
-  }, [conversationId, accountId]);
+  }, [apiPath]);
 
   return (
     <div className="container">
@@ -124,10 +154,12 @@ function ConversationMesssages({ conversationId, accountId }) {
           flex: 1;
         }
       `}</style>
-      <div className="messages">
+      <div className="messages" ref={containerRef}>
         {messages.map((message) => (
           <div key={message.id} className="message">
-            <p>{message.text}</p>
+            <p>
+              (<code>#{message.id})</code> {message.text}
+            </p>
             <p className="secondary">
               by: {message.sender.name} at{" "}
               {new Intl.DateTimeFormat(undefined, {
@@ -142,6 +174,7 @@ function ConversationMesssages({ conversationId, accountId }) {
             </p>
           </div>
         ))}
+        <div ref={loadMoreRef}>Loading older messages…</div>
       </div>
       <form
         onSubmit={(e) => {
